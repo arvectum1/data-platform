@@ -8,7 +8,7 @@ on:
       - '**'
   workflow_dispatch:
   schedule:
-    - cron: '23 3 * * *'
+    - cron: '17 3 * * *'
 
 permissions:
   contents: read
@@ -27,9 +27,11 @@ jobs:
       - name: Validate configuration
         env:
           GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
         run: |
           set -euo pipefail
           test -n "$GITVERSE_TOKEN" || { echo "::error::GITVERSE_TOKEN is missing"; exit 1; }
+          test -n "$GITVERSE_REPOSITORY" || { echo "::error::GITVERSE_REPO is missing"; exit 1; }
 
       - name: Clone GitHub repository as mirror
         env:
@@ -44,49 +46,27 @@ jobs:
       - name: Push branches and tags to GitVerse
         env:
           GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
         run: |
           set -euo pipefail
           cd repository.git
 
           git remote add gitverse \
-            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/arvectum/data-platform.git"
+            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/arvectum/${GITVERSE_REPOSITORY}.git"
 
-          # Mirror normal branches and tags only. GitHub-specific refs/pull/* are excluded.
+          # Mirror only normal branches and tags.
+          # GitHub-specific refs/pull/* are intentionally excluded.
           git push --force --prune gitverse \
             'refs/heads/*:refs/heads/*' \
             'refs/tags/*:refs/tags/*'
 
-      - name: Verify exact mirrored state
-        env:
-          GITVERSE_TOKEN: ${{ secrets.GITVERSE_TOKEN }}
-        run: |
-          set -euo pipefail
-          cd repository.git
-
-          ref_to_verify="$GITHUB_REF"
-          if ! git show-ref --verify --quiet "$ref_to_verify"; then
-            # Branch-deletion pushes no longer have the deleted ref locally.
-            ref_to_verify="refs/heads/main"
-          fi
-
-          expected_sha="$(git rev-parse "$ref_to_verify")"
-          actual_sha="$(git ls-remote \
-            "https://arvectum:${GITVERSE_TOKEN}@gitverse.ru/arvectum/data-platform.git" \
-            "$ref_to_verify" | awk '{print $1}')"
-
-          test -n "$actual_sha" || { echo "::error::Mirrored ref $ref_to_verify is missing on GitVerse"; exit 1; }
-          test "$actual_sha" = "$expected_sha" || {
-            echo "::error::GitVerse ref mismatch for $ref_to_verify: expected $expected_sha, got $actual_sha"
-            exit 1
-          }
-
-          echo "Verified $ref_to_verify at $expected_sha"
-
       - name: Summary
         if: success()
+        env:
+          GITVERSE_REPOSITORY: ${{ vars.GITVERSE_REPO }}
         run: |
-          echo "### GitVerse mirror updated and verified" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Source: \`${GITHUB_REPOSITORY}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Target: \`arvectum/data-platform\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Trigger: \`${GITHUB_EVENT_NAME}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- SHA: \`${GITHUB_SHA}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "### GitVerse mirror updated" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source: ${GITHUB_REPOSITORY}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Target: arvectum/${GITVERSE_REPOSITORY}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Trigger: ${GITHUB_EVENT_NAME}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- SHA: ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"

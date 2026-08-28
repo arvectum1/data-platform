@@ -97,9 +97,19 @@ Domain-neutral data acquisition and extraction foundation for Arvectum products.
 - append-only audit records claim/takeover/renew/release/submit/complete actions using candidate ids rather than candidate values;
 - in-memory, atomic JSON and WAL-backed SQLite queue/audit stores are available.
 
-The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, do not edit learned profiles, do not recover batches item-by-item, do not reparse pages merely to continue a pending review, and do not coordinate competing reviewers manually.
+`DP-ENGINE-010` adds semantic browser recovery when static HTML is transport-valid but semantically incomplete:
 
-See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md), [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md), [`docs/tasks/DP-ENGINE-006.md`](docs/tasks/DP-ENGINE-006.md), [`docs/tasks/DP-ENGINE-007.md`](docs/tasks/DP-ENGINE-007.md), [`docs/tasks/DP-ENGINE-008.md`](docs/tasks/DP-ENGINE-008.md) and [`docs/tasks/DP-ENGINE-009.md`](docs/tasks/DP-ENGINE-009.md).
+- `AUTO` static extraction is inspected after discovery/resolution;
+- if a required field remains unresolved and the first acquisition did not already render, the pipeline performs one `ALWAYS` browser recovery attempt;
+- `NEVER` stays a hard browser prohibition and `ALWAYS` never double-renders;
+- static and rendered results are compared by governed field status/coverage, not by business values or confidence-only differences;
+- a strictly better rendered result is selected, while ties/worse results retain the static extraction;
+- both acquisition traces are retained for audit;
+- browser recovery failure keeps the successful static result and records a safe failure marker instead of failing the job.
+
+The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, do not edit learned profiles, do not recover batches item-by-item, do not reparse pages merely to continue a pending review, do not coordinate competing reviewers manually, and do not manually retry pages whose required fields appear only after JavaScript execution.
+
+See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md), [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md), [`docs/tasks/DP-ENGINE-006.md`](docs/tasks/DP-ENGINE-006.md), [`docs/tasks/DP-ENGINE-007.md`](docs/tasks/DP-ENGINE-007.md), [`docs/tasks/DP-ENGINE-008.md`](docs/tasks/DP-ENGINE-008.md), [`docs/tasks/DP-ENGINE-009.md`](docs/tasks/DP-ENGINE-009.md) and [`docs/tasks/DP-ENGINE-010.md`](docs/tasks/DP-ENGINE-010.md).
 
 ## End-to-end usage
 
@@ -109,12 +119,14 @@ from arvectum_data import FieldSpec, URLExtractionPipeline
 pipeline = URLExtractionPipeline()
 result = pipeline.extract_url(
     "https://example.test/item",
-    [FieldSpec("title"), FieldSpec("price", aliases=("Цена", "Стоимость"))],
+    [FieldSpec("title"), FieldSpec("price", required=True, aliases=("Цена", "Стоимость"))],
 )
 
 if result.ready:
     values = result.values()
 ```
+
+Under default `AUTO` mode, if the static page leaves the required `price` unresolved and the page has not already been browser-rendered, the pipeline automatically tries one rendered recovery and keeps it only when governed extraction quality improves.
 
 ## Batch / resumable execution with durable results
 
@@ -214,7 +226,7 @@ python -m pip install -e '.[dev]'
 pytest
 ```
 
-Browser rendering is optional. To enable the default Playwright fallback:
+Browser rendering is optional. To enable the default Playwright fallback and semantic recovery browser path:
 
 ```bash
 python -m pip install -e '.[browser]'

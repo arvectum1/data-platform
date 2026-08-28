@@ -321,7 +321,7 @@ def test_json_profile_store_survives_reload(tmp_path: Path):
     )
 
     assert stats.confirmations == 1
-    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 1
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
 
 
 def test_pipeline_confirmation_removes_repeated_structured_ambiguity():

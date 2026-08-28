@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .acquisition import (
+    AcquisitionAttempt,
     AcquisitionEngine,
     AcquisitionRequest,
     AcquisitionResult,
@@ -28,6 +29,7 @@ from .profiles import (
     LearningPolicy,
     ProfileAwareProvider,
 )
+from .recovery import SemanticRecoveryPolicy
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +76,7 @@ class URLExtractionPipeline:
         learning_policy: LearningPolicy | None = None,
         learning_enabled: bool = True,
         strict_learning: bool = False,
+        semantic_recovery_policy: SemanticRecoveryPolicy | None = None,
     ) -> None:
         if extraction is not None and providers is not None:
             raise ValueError("Pass either extraction or providers, not both")
@@ -82,6 +85,9 @@ class URLExtractionPipeline:
         self.learning_enabled = learning_enabled
         self.strict_learning = strict_learning
         self.learning_policy = learning_policy or LearningPolicy()
+        self.semantic_recovery_policy = (
+            semantic_recovery_policy or SemanticRecoveryPolicy()
+        )
         self.profile_store = (
             profile_store
             if profile_store is not None
@@ -123,7 +129,97 @@ class URLExtractionPipeline:
     ) -> URLExtractionResult:
         acquired = self.acquisition.acquire(request)
         extracted = self.extraction.extract(acquired.asset, fields)
-        return URLExtractionResult(acquisition=acquired, extraction=extracted)
+        primary = URLExtractionResult(acquisition=acquired, extraction=extracted)
+        if not self.semantic_recovery_policy.should_retry(
+            request,
+            acquired,
+            extracted,
+        ):
+            return primary
+        return self._semantic_render_recovery(request, fields, primary)
+
+    def _semantic_render_recovery(
+        self,
+        request: AcquisitionRequest,
+        fields: Sequence[FieldSpec],
+        primary: URLExtractionResult,
+    ) -> URLExtractionResult:
+        trigger_fields = primary.extraction.unresolved_required_fields
+        recovery_request = replace(request, render_mode=RenderMode.ALWAYS)
+
+        try:
+            rendered_acquisition = self.acquisition.acquire(recovery_request)
+            rendered_extraction = self.extraction.extract(
+                rendered_acquisition.asset,
+                fields,
+            )
+        except Exception as exc:
+            renderer = getattr(self.acquisition, "renderer", None)
+            method = getattr(renderer, "name", "browser")
+            failed_attempt = AcquisitionAttempt(
+                method=method,
+                success=False,
+                reason=f"semantic_required_recovery:{type(exc).__name__}",
+                rendered=True,
+            )
+            acquisition = AcquisitionResult(
+                asset=primary.acquisition.asset,
+                attempts=primary.acquisition.attempts + (failed_attempt,),
+                warnings=primary.acquisition.warnings
+                + (
+                    "semantic_render_recovery_triggered:"
+                    + ",".join(trigger_fields),
+                    f"semantic_render_recovery_failed:{type(exc).__name__}",
+                ),
+            )
+            return URLExtractionResult(
+                acquisition=acquisition,
+                extraction=primary.extraction,
+                learning_events=primary.learning_events,
+                learning_warnings=primary.learning_warnings,
+            )
+
+        combined_attempts = (
+            primary.acquisition.attempts + rendered_acquisition.attempts
+        )
+        combined_warnings = (
+            primary.acquisition.warnings
+            + rendered_acquisition.warnings
+            + (
+                "semantic_render_recovery_triggered:"
+                + ",".join(trigger_fields),
+            )
+        )
+
+        if self.semantic_recovery_policy.prefer_rendered(
+            primary.extraction,
+            rendered_extraction,
+        ):
+            acquisition = AcquisitionResult(
+                asset=rendered_acquisition.asset,
+                attempts=combined_attempts,
+                warnings=combined_warnings
+                + ("semantic_render_recovery_selected:rendered",),
+            )
+            return URLExtractionResult(
+                acquisition=acquisition,
+                extraction=rendered_extraction,
+                learning_events=primary.learning_events,
+                learning_warnings=primary.learning_warnings,
+            )
+
+        acquisition = AcquisitionResult(
+            asset=primary.acquisition.asset,
+            attempts=combined_attempts,
+            warnings=combined_warnings
+            + ("semantic_render_recovery_selected:static",),
+        )
+        return URLExtractionResult(
+            acquisition=acquisition,
+            extraction=primary.extraction,
+            learning_events=primary.learning_events,
+            learning_warnings=primary.learning_warnings,
+        )
 
     def extract_url(
         self,

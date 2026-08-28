@@ -75,9 +75,20 @@ Domain-neutral data acquisition and extraction foundation for Arvectum products.
 - `max_items` supports cooperative worker slices for a future Arvectum OS scheduler;
 - checkpoints store execution state only, not URL/header payloads or extracted business values.
 
-The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, do not edit learned profiles, and do not recover batches item-by-item in the normal path.
+`DP-ENGINE-008` adds durable result/review persistence alongside those checkpoints:
 
-See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md), [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md), [`docs/tasks/DP-ENGINE-006.md`](docs/tasks/DP-ENGINE-006.md) and [`docs/tasks/DP-ENGINE-007.md`](docs/tasks/DP-ENGINE-007.md).
+- `ResultCodec` serializes governed acquisition/extraction/review state without stringifying candidate values;
+- raw page HTML/text/attributes are omitted by default and can be explicitly enabled for governed source snapshots;
+- `InMemoryResultStore`, `JsonResultStore` and WAL-backed `SQLiteResultStore` provide result persistence;
+- payload SHA-256 detects corruption/tampering and optimistic revisions protect concurrent review updates;
+- `JobExecutor` persists the semantic result before writing a terminal checkpoint;
+- resume rehydrates terminal `JobItemResult.result` when a result store is configured;
+- a crash after result persistence but before terminal checkpoint is recovered without fetching the page again;
+- `DurableReviewCoordinator` loads pending candidates after restart, confirms/rejects existing candidate ids through the normal pipeline, and can reconcile the checkpoint state.
+
+The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, do not edit learned profiles, do not recover batches item-by-item, and do not reparse pages merely to continue a pending review.
+
+See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md), [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md), [`docs/tasks/DP-ENGINE-006.md`](docs/tasks/DP-ENGINE-006.md), [`docs/tasks/DP-ENGINE-007.md`](docs/tasks/DP-ENGINE-007.md) and [`docs/tasks/DP-ENGINE-008.md`](docs/tasks/DP-ENGINE-008.md).
 
 ## End-to-end usage
 
@@ -94,10 +105,16 @@ if result.ready:
     values = result.values()
 ```
 
-## Batch / resumable execution
+## Batch / resumable execution with durable results
 
 ```python
-from arvectum_data import ExtractionJob, FieldSpec, JobExecutor, JsonJobCheckpointStore
+from arvectum_data import (
+    ExtractionJob,
+    FieldSpec,
+    JobExecutor,
+    JsonJobCheckpointStore,
+    SQLiteResultStore,
+)
 
 job = ExtractionJob.from_urls(
     "catalog-refresh-2026-08-28",
@@ -105,13 +122,41 @@ job = ExtractionJob.from_urls(
     [FieldSpec("title"), FieldSpec("price", required=True)],
 )
 
+results = SQLiteResultStore("state/results.db")
 executor = JobExecutor(
     checkpoint_store=JsonJobCheckpointStore("state/jobs"),
+    result_store=results,
 )
 run = executor.run(job, max_items=25)
 ```
 
-Calling `run(job)` again resumes the same checkpoint and skips terminal items. Checkpoints persist execution-control state only; durable extraction output/review evidence remains a separate layer.
+Calling `run(job)` again resumes the checkpoint and skips terminal acquisition work. When a result store is configured, terminal result/evidence is also rehydrated into `JobItemResult.result`.
+
+## Continue pending review after restart
+
+```python
+from arvectum_data import DurableReviewCoordinator
+
+review = DurableReviewCoordinator(
+    results,
+    pipeline=executor.pipeline,
+    checkpoint_store=executor.checkpoint_store,
+)
+
+record = review.pending(job_id=job.job_id)[0]
+record, persisted = review.get(record.job_id, record.item_id)
+decision = persisted.extraction.decisions["price"]
+candidate_id = decision.candidates[0].candidate_id
+
+updated = review.confirm(
+    record.job_id,
+    record.item_id,
+    {"price": candidate_id},
+    expected_revision=record.revision,
+)
+```
+
+This review path does not reacquire the URL. The result store is a protected data/evidence store: unlike the execution checkpoint, it intentionally contains source identity, candidate values and evidence. Raw page content remains off by default unless `ResultCodec(include_raw_content=True)` is supplied.
 
 ## Persistent site learning
 

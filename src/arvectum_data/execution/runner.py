@@ -5,7 +5,8 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from ..engine import FieldStatus
-from ..orchestration import URLExtractionPipeline
+from ..orchestration import URLExtractionPipeline, URLExtractionResult
+from ..results import ResultCodec, ResultRepository, ResultStore
 from .checkpoints import InMemoryJobCheckpointStore, JobCheckpointStore
 from .models import (
     ExtractionJob,
@@ -31,6 +32,8 @@ class JobExecutor:
         *,
         retry_policy: RetryPolicy | None = None,
         checkpoint_store: JobCheckpointStore | None = None,
+        result_store: ResultStore | None = None,
+        result_codec: ResultCodec | None = None,
         sleeper: Callable[[float], None] | None = None,
         clock: Callable[[], float] | None = None,
     ) -> None:
@@ -43,6 +46,15 @@ class JobExecutor:
         )
         self._sleep = sleeper if sleeper is not None else time.sleep
         self._clock = clock if clock is not None else time.time
+        self.result_repository = (
+            ResultRepository(
+                result_store,
+                codec=result_codec,
+                clock=self._clock,
+            )
+            if result_store is not None
+            else None
+        )
 
     def run(
         self,
@@ -53,6 +65,8 @@ class JobExecutor:
     ) -> JobRunResult:
         if max_items is not None and max_items < 1:
             raise ValueError("max_items must be >= 1")
+        if not resume and self.result_repository is not None:
+            self.result_repository.clear_job(job.job_id)
         started_at = self._clock()
         checkpoint = self._load_checkpoint(job, resume=resume)
         current: dict[str, JobItemResult] = {}
@@ -75,11 +89,13 @@ class JobExecutor:
                 continue
             state = checkpoint.items[item.item_id]
             status = JobItemStatus.PENDING if state.status is JobItemStatus.RUNNING else state.status
+            durable_result = self._load_durable_result(job, item) if state.status.terminal else None
             items.append(
                 JobItemResult(
                     item=item,
                     status=status,
                     attempt_count=state.attempts,
+                    result=durable_result,
                     error=state.last_error,
                     review_fields=state.review_fields,
                     unresolved_required_fields=state.unresolved_required_fields,
@@ -97,6 +113,10 @@ class JobExecutor:
 
     def clear_checkpoint(self, job_id: str) -> None:
         self.checkpoint_store.clear(job_id)
+
+    def clear_results(self, job_id: str) -> None:
+        if self.result_repository is not None:
+            self.result_repository.clear_job(job_id)
 
     def _load_checkpoint(self, job: ExtractionJob, *, resume: bool) -> JobCheckpoint:
         loaded = self.checkpoint_store.load(job.job_id) if resume else None
@@ -149,6 +169,10 @@ class JobExecutor:
     ) -> tuple[JobItemResult, JobCheckpoint]:
         initial = checkpoint.items[item.item_id]
         attempts: list[JobAttempt] = []
+
+        recovered = self._recover_durable_result(job, item, initial, checkpoint)
+        if recovered is not None:
+            return recovered
 
         if (
             initial.status is JobItemStatus.RUNNING
@@ -217,22 +241,15 @@ class JobExecutor:
 
             finished = self._clock()
             attempts.append(JobAttempt(attempt_number, started, finished, True))
-            if extraction.requires_confirmation:
-                status = JobItemStatus.REVIEW_REQUIRED
-                review_fields = tuple(
-                    key
-                    for key, decision in extraction.extraction.decisions.items()
-                    if decision.status is FieldStatus.NEEDS_CONFIRMATION
+            status, review_fields, unresolved = self._classify_result(extraction)
+
+            if self.result_repository is not None:
+                self.result_repository.persist_initial(
+                    job_id=job.job_id,
+                    item_id=item.item_id,
+                    definition_hash=job.definition_hash,
+                    result=extraction,
                 )
-                unresolved = extraction.unresolved_required_fields
-            elif extraction.unresolved_required_fields:
-                status = JobItemStatus.INCOMPLETE
-                review_fields = ()
-                unresolved = extraction.unresolved_required_fields
-            else:
-                status = JobItemStatus.SUCCEEDED
-                review_fields = ()
-                unresolved = ()
 
             checkpoint = self._replace_state(
                 checkpoint,
@@ -280,6 +297,86 @@ class JobExecutor:
             ),
             checkpoint,
         )
+
+    def _recover_durable_result(
+        self,
+        job: ExtractionJob,
+        item: JobItem,
+        state: JobCheckpointItem,
+        checkpoint: JobCheckpoint,
+    ) -> tuple[JobItemResult, JobCheckpoint] | None:
+        if self.result_repository is None or state.status is not JobItemStatus.RUNNING:
+            return None
+        loaded = self.result_repository.load_result(
+            job.job_id,
+            item.item_id,
+            expected_definition_hash=job.definition_hash,
+        )
+        if loaded is None:
+            return None
+        _, extraction = loaded
+        status, review_fields, unresolved = self._classify_result(extraction)
+        now = self._clock()
+        checkpoint = self._replace_state(
+            checkpoint,
+            item.item_id,
+            JobCheckpointItem(
+                status=status,
+                attempts=state.attempts,
+                review_fields=review_fields,
+                unresolved_required_fields=unresolved,
+                updated_at=now,
+            ),
+        )
+        return (
+            JobItemResult(
+                item=item,
+                status=status,
+                attempt_count=state.attempts,
+                result=extraction,
+                review_fields=review_fields,
+                unresolved_required_fields=unresolved,
+                resumed=True,
+            ),
+            checkpoint,
+        )
+
+    def _load_durable_result(
+        self,
+        job: ExtractionJob,
+        item: JobItem,
+    ) -> URLExtractionResult | None:
+        if self.result_repository is None:
+            return None
+        loaded = self.result_repository.load_result(
+            job.job_id,
+            item.item_id,
+            expected_definition_hash=job.definition_hash,
+        )
+        return None if loaded is None else loaded[1]
+
+    @staticmethod
+    def _classify_result(
+        extraction: URLExtractionResult,
+    ) -> tuple[JobItemStatus, tuple[str, ...], tuple[str, ...]]:
+        if extraction.requires_confirmation:
+            review_fields = tuple(
+                key
+                for key, decision in extraction.extraction.decisions.items()
+                if decision.status is FieldStatus.NEEDS_CONFIRMATION
+            )
+            return (
+                JobItemStatus.REVIEW_REQUIRED,
+                review_fields,
+                extraction.unresolved_required_fields,
+            )
+        if extraction.unresolved_required_fields:
+            return (
+                JobItemStatus.INCOMPLETE,
+                (),
+                extraction.unresolved_required_fields,
+            )
+        return JobItemStatus.SUCCEEDED, (), ()
 
     def _exhausted_interrupted(
         self,

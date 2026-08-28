@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "arvectum-data-platform"
-version = "0.7.0"
-description = "Domain-neutral resumable execution, acquisition, learned discovery and governed extraction pipeline for Arvectum Data Platform"
+version = "0.8.0"
+description = "Domain-neutral durable review, resumable execution, acquisition and governed extraction pipeline for Arvectum Data Platform"
 requires-python = ">=3.11"
 dependencies = []
 

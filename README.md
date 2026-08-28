@@ -86,9 +86,20 @@ Domain-neutral data acquisition and extraction foundation for Arvectum products.
 - a crash after result persistence but before terminal checkpoint is recovered without fetching the page again;
 - `DurableReviewCoordinator` loads pending candidates after restart, confirms/rejects existing candidate ids through the normal pipeline, and can reconcile the checkpoint state.
 
-The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, do not edit learned profiles, do not recover batches item-by-item, and do not reparse pages merely to continue a pending review.
+`DP-ENGINE-009` adds a governed reviewer queue above durable results:
 
-See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md), [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md), [`docs/tasks/DP-ENGINE-006.md`](docs/tasks/DP-ENGINE-006.md), [`docs/tasks/DP-ENGINE-007.md`](docs/tasks/DP-ENGINE-007.md) and [`docs/tasks/DP-ENGINE-008.md`](docs/tasks/DP-ENGINE-008.md).
+- `GovernedReviewQueue` exposes pending review work without copying result payloads into queue state;
+- review items are claimed through expiring bearer leases with reviewer identity and bounded TTL;
+- an active lease prevents another reviewer from claiming/submitting the same item;
+- expired leases can be taken over automatically;
+- submit requires reviewer id, lease token and expected durable-result revision;
+- partial review keeps the lease active, while ready/incomplete completion releases it;
+- append-only audit records claim/takeover/renew/release/submit/complete actions using candidate ids rather than candidate values;
+- in-memory, atomic JSON and WAL-backed SQLite queue/audit stores are available.
+
+The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, do not edit learned profiles, do not recover batches item-by-item, do not reparse pages merely to continue a pending review, and do not coordinate competing reviewers manually.
+
+See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md), [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md), [`docs/tasks/DP-ENGINE-006.md`](docs/tasks/DP-ENGINE-006.md), [`docs/tasks/DP-ENGINE-007.md`](docs/tasks/DP-ENGINE-007.md), [`docs/tasks/DP-ENGINE-008.md`](docs/tasks/DP-ENGINE-008.md) and [`docs/tasks/DP-ENGINE-009.md`](docs/tasks/DP-ENGINE-009.md).
 
 ## End-to-end usage
 
@@ -132,31 +143,46 @@ run = executor.run(job, max_items=25)
 
 Calling `run(job)` again resumes the checkpoint and skips terminal acquisition work. When a result store is configured, terminal result/evidence is also rehydrated into `JobItemResult.result`.
 
-## Continue pending review after restart
+## Governed review queue after restart
 
 ```python
-from arvectum_data import DurableReviewCoordinator
+from arvectum_data import (
+    GovernedReviewQueue,
+    ReviewerIdentity,
+    SQLiteReviewQueueStore,
+)
 
-review = DurableReviewCoordinator(
+reviews = GovernedReviewQueue(
     results,
+    queue_store=SQLiteReviewQueueStore("state/review-queue.db"),
     pipeline=executor.pipeline,
     checkpoint_store=executor.checkpoint_store,
 )
 
-record = review.pending(job_id=job.job_id)[0]
-record, persisted = review.get(record.job_id, record.item_id)
-decision = persisted.extraction.decisions["price"]
-candidate_id = decision.candidates[0].candidate_id
+reviewer = ReviewerIdentity("reviewer-42", display_name="Operator")
+claim = reviews.claim_next(reviewer)
 
-updated = review.confirm(
-    record.job_id,
-    record.item_id,
-    {"price": candidate_id},
-    expected_revision=record.revision,
-)
+if claim is not None:
+    lease, record, persisted = reviews.get_claim(
+        claim.item.job_id,
+        claim.item.item_id,
+        reviewer,
+        claim.lease.lease_token,
+    )
+    decision = persisted.extraction.decisions["price"]
+    reviews.submit(
+        record.job_id,
+        record.item_id,
+        reviewer,
+        lease.lease_token,
+        {"price": decision.candidates[0].candidate_id},
+        expected_result_revision=record.revision,
+    )
 ```
 
-This review path does not reacquire the URL. The result store is a protected data/evidence store: unlike the execution checkpoint, it intentionally contains source identity, candidate values and evidence. Raw page content remains off by default unless `ResultCodec(include_raw_content=True)` is supplied.
+The queue does not reacquire the page and does not accept manual replacement values. Lease tokens are bearer capabilities and should be handled as protected runtime credentials. `ReviewerIdentity` represents an identity already authenticated by the surrounding application/runtime; login, SSO and authorization policy remain outside the parser engine.
+
+The result store is a protected data/evidence store: unlike the execution checkpoint and review audit, it intentionally contains source identity, candidate values and evidence. Raw page content remains off by default unless `ResultCodec(include_raw_content=True)` is supplied.
 
 ## Persistent site learning
 

@@ -30,6 +30,7 @@ class RawAsset:
     text: str | None = None
     attributes: Mapping[str, Any] = field(default_factory=dict)
     html: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

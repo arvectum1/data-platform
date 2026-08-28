@@ -34,9 +34,33 @@ Domain-neutral data acquisition and extraction foundation for Arvectum products.
 - decoded HTML/text is normalized into the existing `RawAsset` contract;
 - no per-site transport toggles are needed in the normal path.
 
-The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, and do not choose static-vs-browser acquisition per site in the normal `AUTO` path.
+`DP-ENGINE-004` composes those layers into one governed URL execution path:
 
-See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md) and [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md).
+- `URLExtractionPipeline.extract_url()` runs acquisition, discovery and extraction in one call;
+- the default pipeline wires `AcquisitionEngine` + `AutoDiscoveryProvider` + `ExtractionEngine`;
+- `URLExtractionResult` preserves acquisition evidence and extraction evidence together;
+- `ready` is true only when no review is required and no required field is unresolved/rejected;
+- `confirm()` continues the same result without reacquiring the page or losing transport provenance;
+- applications no longer need to manually glue `DP-ENGINE-003` to `DP-ENGINE-002`.
+
+The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, and do not wire the extraction stages manually in the normal path.
+
+See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md) and [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md).
+
+## End-to-end usage
+
+```python
+from arvectum_data import FieldSpec, URLExtractionPipeline
+
+pipeline = URLExtractionPipeline()
+result = pipeline.extract_url(
+    "https://example.test/item",
+    [FieldSpec("title"), FieldSpec("price", aliases=("Цена", "Стоимость"))],
+)
+
+if result.ready:
+    values = result.values()
+```
 
 ## Development
 

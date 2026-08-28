@@ -169,7 +169,7 @@ def test_base_href_is_supported_but_cannot_escape_same_origin_scope():
     acquisition = FakeAcquisition(
         {
             "https://example.com/list": FakePage(
-                '<base href="https://outside.test/catalog/"><a href="one">One</a><a href="/local">Local</a>'
+                '<base href="https://outside.test/catalog/"><a href="one">One</a><a href="https://example.com/local">Local</a>'
             ),
             "https://example.com/local": FakePage(""),
         }

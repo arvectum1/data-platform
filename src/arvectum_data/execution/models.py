@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -13,6 +14,7 @@ from ..orchestration import URLExtractionResult
 
 JOB_CHECKPOINT_VERSION = 1
 MAX_ERROR_MESSAGE = 2_000
+_URL_IN_ERROR_RE = re.compile(r"(?i)https?://[^\s\'\"<>]+")
 
 
 class JobItemStatus(StrEnum):
@@ -195,7 +197,7 @@ class JobError:
 
     @classmethod
     def from_exception(cls, exc: Exception, *, retryable: bool) -> "JobError":
-        message = str(exc)
+        message = _URL_IN_ERROR_RE.sub("<url>", str(exc))
         if len(message) > MAX_ERROR_MESSAGE:
             message = message[: MAX_ERROR_MESSAGE - 3] + "..."
         return cls(type(exc).__name__, message, retryable)

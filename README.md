@@ -64,9 +64,20 @@ Domain-neutral data acquisition and extraction foundation for Arvectum products.
 - `SQLiteSiteProfileStore` provides WAL-backed transactional storage for multiple processes on one runtime node;
 - `URLExtractionPipeline.maintain_profiles()` exposes a scheduler-friendly maintenance hook.
 
-The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, and do not edit learned profiles in the normal path.
+`DP-ENGINE-007` adds resumable batch/job execution above the URL pipeline:
 
-See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md), [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md) and [`docs/tasks/DP-ENGINE-006.md`](docs/tasks/DP-ENGINE-006.md).
+- `ExtractionJob` defines ordered URL items plus shared semantic fields;
+- `JobExecutor` provides per-item failure isolation and bounded sequential execution;
+- default retries apply only to acquisition/timeout/OS failures with deterministic capped backoff;
+- review-required and unresolved-required outcomes are distinct from execution failures and are not blindly retried;
+- in-memory and atomic JSON checkpoint stores support resume after interruption;
+- job-definition hashes block unsafe resume after URLs/fields/acquisition controls change;
+- `max_items` supports cooperative worker slices for a future Arvectum OS scheduler;
+- checkpoints store execution state only, not URL/header payloads or extracted business values.
+
+The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, do not edit learned profiles, and do not recover batches item-by-item in the normal path.
+
+See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md), [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md), [`docs/tasks/DP-ENGINE-006.md`](docs/tasks/DP-ENGINE-006.md) and [`docs/tasks/DP-ENGINE-007.md`](docs/tasks/DP-ENGINE-007.md).
 
 ## End-to-end usage
 
@@ -82,6 +93,25 @@ result = pipeline.extract_url(
 if result.ready:
     values = result.values()
 ```
+
+## Batch / resumable execution
+
+```python
+from arvectum_data import ExtractionJob, FieldSpec, JobExecutor, JsonJobCheckpointStore
+
+job = ExtractionJob.from_urls(
+    "catalog-refresh-2026-08-28",
+    ["https://example.test/a", "https://example.test/b"],
+    [FieldSpec("title"), FieldSpec("price", required=True)],
+)
+
+executor = JobExecutor(
+    checkpoint_store=JsonJobCheckpointStore("state/jobs"),
+)
+run = executor.run(job, max_items=25)
+```
+
+Calling `run(job)` again resumes the same checkpoint and skips terminal items. Checkpoints persist execution-control state only; durable extraction output/review evidence remains a separate layer.
 
 ## Persistent site learning
 

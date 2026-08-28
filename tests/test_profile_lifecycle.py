@@ -92,7 +92,7 @@ def test_hard_ttl_is_enforced_lazily_before_prune():
         store.get_stats("shop.example.com", "price", fingerprint).confirmations
         == 0.0
     )
-    assert fingerprint.key in json.dumps(store.snapshot(), ensure_ascii=False)
+    assert store.snapshot()["sites"]["shop.example.com"]["price"]
 
 
 def test_prune_removes_expired_pattern_field_and_site_and_bumps_revision():

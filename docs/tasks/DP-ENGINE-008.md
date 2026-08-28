@@ -4,75 +4,58 @@
 
 ## Goal
 
-Persist governed extraction results separately from `DP-ENGINE-007` execution checkpoints so successful/review-required/incomplete item evidence survives process restarts and review can continue without reacquiring or reparsing the page.
+Persist governed extraction results separately from `DP-ENGINE-007` execution checkpoints so `succeeded`, `review_required` and `incomplete` item evidence survives process restarts and review can continue without reacquiring or reparsing the page.
 
-The separation is deliberate:
+The split is deliberate:
 
-- **checkpoint store** = execution control state only;
-- **result store** = durable extraction/review data and evidence.
+- **checkpoint store** — execution control state only;
+- **result store** — durable extraction/review data and evidence.
 
-This closes the main persistence gap left by `DP-ENGINE-007`: a `review_required` checkpoint can now point to a durable candidate set that a reviewer may open later, confirm/reject, persist, and reconcile back into the job state.
+## Durable record
 
-## Durable result record
+`StoredResultRecord` is keyed by `job_id` + `item_id` and bound to the job `definition_hash`.
 
-`StoredResultRecord` is keyed by:
+It stores:
 
-- `job_id`;
-- `item_id`;
-- job `definition_hash`.
-
-It also stores:
-
-- result status (`ready`, `review_required`, `incomplete`);
-- payload SHA-256;
+- status: `ready`, `review_required` or `incomplete`;
+- schema version (`RESULT_SCHEMA_VERSION = 1`);
 - optimistic `revision`;
 - `created_at` / `updated_at`;
-- schema version (`RESULT_SCHEMA_VERSION = 1`).
+- encoded `URLExtractionResult` payload;
+- SHA-256 of that payload.
 
-A record payload hash is recomputed during deserialization. Tampered/corrupted payloads fail with `ResultIntegrityError` rather than being silently trusted.
+The payload hash is recomputed during load. Corrupted/tampered data raises `ResultIntegrityError`.
 
-## Persisted payload
+## Persisted evidence
 
-The default durable payload preserves what is required to continue governed review:
+The default payload contains everything required to continue governed review:
 
-- `RawAsset.asset_id` and `source_url`;
-- asset metadata/provenance;
-- acquisition attempts and warnings;
-- all field definitions;
-- field statuses/reasons;
-- all candidates and candidate ids;
-- candidate values/confidence/provider;
+- asset id/source URL and asset metadata;
+- acquisition attempts/warnings;
+- field specs/statuses/reasons;
+- candidates, candidate ids and values;
+- confidence/provider;
 - evidence kind/source reference/excerpt/metadata;
 - provider errors;
 - learning events/warnings.
 
-The acquisition and extraction sides are reconstructed onto the same `RawAsset` object when a record is loaded.
+The acquisition and extraction objects are reconstructed onto the same `RawAsset` instance.
 
-### Raw page content policy
+### Raw page content
 
-`ResultCodec()` defaults to `include_raw_content=False`.
+`ResultCodec()` defaults to `include_raw_content=False`, so it does **not** persist raw text, HTML or `RawAsset.attributes`.
 
-Therefore the durable result normally omits:
-
-- raw page text;
-- raw HTML;
-- raw asset attributes.
-
-Those values are not required by `ExtractionEngine.confirm()` or confirmation learning. This avoids turning every review record into a full page archive.
-
-A governed deployment that explicitly needs a source snapshot may use:
+Those are not required for `ExtractionEngine.confirm()` or confirmation learning. A deployment that explicitly requires a source snapshot may use:
 
 ```python
-codec = ResultCodec(include_raw_content=True)
+ResultCodec(include_raw_content=True)
 ```
 
-Then text/HTML/attributes are included in the persisted payload.
+That policy is persisted in the record and preserved by subsequent review updates, even if the review coordinator itself was constructed with the default codec.
 
-## Value codec
+## Typed value codec
 
-Candidate values and metadata are not stringified silently.
-
-The codec preserves these types explicitly:
+Candidate values/metadata are not silently stringified. The baseline codec preserves:
 
 - `None`;
 - `bool`;
@@ -84,9 +67,7 @@ The codec preserves these types explicitly:
 - `tuple`;
 - mappings with string keys.
 
-Unsupported arbitrary Python objects raise `ResultSerializationError`.
-
-This prevents a persisted review candidate from changing type merely because the process restarted.
+Unsupported arbitrary objects raise `ResultSerializationError`.
 
 ## Result stores
 
@@ -99,51 +80,38 @@ This prevents a persisted review candidate from changing type merely because the
 - `delete(job_id, item_id)`;
 - `clear_job(job_id)`.
 
-Three baseline implementations are included.
+Implementations:
 
-### In-memory
+### `InMemoryResultStore`
 
-`InMemoryResultStore` is useful for tests and process-local execution.
+Process-local/test backend.
 
-### JSON
-
-`JsonResultStore(directory)` provides:
+### `JsonResultStore`
 
 - atomic temp-file + `os.replace` writes;
 - hashed job/item path names;
-- one durable JSON record per item;
-- reload/list/delete/clear behavior.
+- one JSON record per item;
+- intended for a simple local single-writer deployment.
 
-Like the JSON checkpoint/profile stores, this is a simple local single-writer backend, not the preferred multi-process backend.
+### `SQLiteResultStore`
 
-### SQLite
-
-`SQLiteResultStore(path)` provides:
-
-- stdlib `sqlite3` only;
+- Python stdlib `sqlite3` only;
 - WAL mode;
-- busy timeout;
+- configurable busy timeout;
 - `BEGIN IMMEDIATE` writes;
-- optimistic revision checks inside a transaction;
-- shared state across processes on one runtime node;
-- status/job indexes for review lookup;
-- explicit close/context-manager support.
-
-This mirrors the single-node production persistence direction established by `DP-ENGINE-006`.
+- optimistic revision checks in the transaction;
+- shared state for multiple processes on one runtime node;
+- status/job index for pending-review lookup.
 
 ## Optimistic review revisions
 
-Every created result starts at revision `1`.
+Created results start at revision `1`; each successful update increments the revision.
 
-Every successful update increments the revision.
+`DurableReviewCoordinator.confirm(... expected_revision=N)` rejects stale reviewer submissions through `ResultConflictError` instead of allowing last-write-wins.
 
-`DurableReviewCoordinator.confirm(... expected_revision=N)` can therefore reject stale browser/UI submissions if another reviewer/process already changed the record.
+## `JobExecutor` integration
 
-The result store never performs blind last-write-wins review updates.
-
-## Executor integration
-
-`JobExecutor` accepts:
+`JobExecutor` accepts optional:
 
 ```python
 JobExecutor(
@@ -153,47 +121,37 @@ JobExecutor(
 )
 ```
 
-When a URL extraction returns a semantic result (`succeeded`, `review_required` or `incomplete`), execution order is:
+For a semantic extraction result, write order is:
 
 1. extraction completes;
-2. durable result is written;
-3. terminal checkpoint state is written.
+2. durable result is persisted;
+3. terminal checkpoint state is persisted.
 
-Persisting the result **before** the terminal checkpoint is intentional.
+The result is intentionally durable **before** the checkpoint says terminal.
 
 ### Crash-window recovery
 
-If the process crashes after step 2 but before step 3, the durable checkpoint still says `running`, but the result already exists.
+If the process dies after step 2 but before step 3, the checkpoint remains `running` while the durable result exists.
 
-On resume, `JobExecutor` first checks for a matching durable result. If found, it:
+On resume the executor:
 
-1. restores the `URLExtractionResult`;
-2. derives the terminal item state;
-3. repairs the checkpoint;
-4. returns the item with `resumed=True`;
+1. loads the matching durable result;
+2. reconstructs `URLExtractionResult`;
+3. derives/repairs the terminal checkpoint state;
+4. returns `resumed=True`;
 5. does **not** fetch the URL again.
 
-This removes an avoidable duplicate acquisition after the expensive work already completed successfully.
+## Rehydrated terminal items
 
-## Rehydrating terminal items
+When a result store is configured, normal resume also reloads persisted evidence into `JobItemResult.result` for terminal items.
 
-With a result store configured, ordinary checkpoint resume also reloads the durable payload into `JobItemResult.result` for terminal items.
+Without a result store, `DP-ENGINE-007` behavior is unchanged.
 
-Without a result store, `DP-ENGINE-007` behavior is unchanged: resumed terminal items have no live extraction payload.
+`run(job, resume=False)` clears prior result records for that `job_id` before a fresh run. `clear_results(job_id)` is also available independently from `clear_checkpoint(job_id)`.
 
-This keeps durable persistence opt-in at the executor boundary and backward compatible.
+## Durable review continuation
 
-## Clean restart semantics
-
-`run(job, resume=False)` means a clean execution restart.
-
-When a result store is configured, existing durable results for that `job_id` are cleared before the fresh execution begins, matching the fresh checkpoint behavior.
-
-`clear_results(job_id)` is also available independently from `clear_checkpoint(job_id)`.
-
-## Durable review coordinator
-
-`DurableReviewCoordinator` provides the post-restart review path:
+`DurableReviewCoordinator` is the post-restart review path:
 
 ```python
 coordinator = DurableReviewCoordinator(
@@ -202,104 +160,65 @@ coordinator = DurableReviewCoordinator(
     checkpoint_store=checkpoint_store,
 )
 
-pending = coordinator.pending(job_id="catalog-refresh")
-record, result = coordinator.get("catalog-refresh", item_id)
-
+record, result = coordinator.get(job_id, item_id)
 candidate_id = result.extraction.decisions["price"].candidates[0].candidate_id
+
 update = coordinator.confirm(
-    "catalog-refresh",
+    job_id,
     item_id,
     {"price": candidate_id},
     expected_revision=record.revision,
 )
 ```
 
-`confirm()` calls the existing `URLExtractionPipeline.confirm()` path on the reconstructed result.
-
-Therefore the core review rule is unchanged:
+Confirmation delegates to the existing `URLExtractionPipeline.confirm()` contract. Therefore the reviewer may only:
 
 - select an existing candidate id; or
 - reject a review-required field with `None`.
 
-There is still no manual replacement-value API.
-
-No acquisition method is invoked during durable review continuation.
+There is still no manual replacement-value API and no acquisition call during durable review.
 
 ## Confirmation learning after restart
 
-Because review goes through the normal pipeline `confirm()` method, `DP-ENGINE-005` structural learning still applies.
+Because review uses the normal pipeline `confirm()`, `DP-ENGINE-005` structural learning remains active.
 
-A production review worker should construct its review pipeline with the same persistent site-profile backend used by extraction workers (for example `SQLiteSiteProfileStore`).
-
-The persisted result supplies the original source URL and candidate evidence needed by the learner; the page itself is not fetched again.
+Production review workers should use the same persistent site-profile backend as extraction workers when learning must survive process boundaries.
 
 ## Checkpoint synchronization
 
-If a `JobCheckpointStore` is provided to `DurableReviewCoordinator`, confirmation also reconciles the job item state:
+When a checkpoint store is supplied, the coordinator reconciles the reviewed item:
 
-- final ready result -> `succeeded`;
-- remaining review fields -> `review_required`;
+- durable `ready` -> checkpoint `succeeded`;
+- remaining review work -> `review_required`;
 - rejected/unresolved required result -> `incomplete`.
 
 Attempt count is preserved.
 
-`reconcile_checkpoint(job_id, item_id)` can repeat this synchronization explicitly.
+`reconcile_checkpoint(job_id, item_id)` can repeat synchronization explicitly.
 
-### Cross-store failure boundary
-
-Result update and checkpoint update are separate persistence operations and are not a distributed transaction.
-
-Ordering is:
-
-1. persist the reviewed result;
-2. update the checkpoint.
-
-If checkpoint persistence fails after the result update, the durable review decision is not discarded. `reconcile_checkpoint()` can repair the control-plane state later.
-
-A future deployment that requires one atomic transaction can implement both concerns inside a common infrastructure adapter without changing the extraction/review contracts.
+Result update and checkpoint update are separate persistence operations, not a distributed transaction. The reviewed result is written first. If checkpoint update fails, the review decision remains durable and reconciliation can repair control state later.
 
 ## Sensitive-data boundary
 
-Unlike the `DP-ENGINE-007` checkpoint, the result store intentionally contains review data such as:
+Unlike the minimal `DP-ENGINE-007` checkpoint, the result store intentionally contains source identity, candidate values and evidence. It is therefore a **protected data/evidence store**.
 
-- source URLs;
-- extracted candidate values;
-- evidence excerpts/metadata;
-- acquisition provenance.
-
-It is therefore a **protected data/evidence store**, not a low-sensitivity control checkpoint.
-
-This task does not pretend otherwise and does not copy result payloads back into checkpoint JSON.
-
-Raw page content remains opt-in as described above.
+Raw page text/HTML/attributes remain opt-in, but result-store access, encryption-at-rest and retention policy belong to deployment/security layers rather than the checkpoint contract.
 
 ## Failure semantics
 
-- Result serialization failure prevents terminal persistence.
-- Result-store failure is authoritative and is not silently swallowed.
-- The executor leaves the pre-terminal `running` checkpoint state, allowing later recovery/retry.
-- Existing result with the same payload/definition is idempotent.
-- Existing result with different payload is not silently clobbered; `ResultConflictError` is raised.
-- Job definition mismatch raises `ResultDefinitionMismatchError`.
-- Stale review revision raises `ResultConflictError`.
-- Tampered payload raises `ResultIntegrityError`.
+- serialization failure prevents terminal result persistence;
+- result-store failures are authoritative and are not swallowed;
+- same definition + identical payload is idempotent;
+- a different existing payload is not silently overwritten;
+- job-definition mismatch raises `ResultDefinitionMismatchError`;
+- stale revision raises `ResultConflictError`;
+- payload corruption raises `ResultIntegrityError`.
 
 ## Human participation rule
 
-The customer/reviewer still only performs the minimal governed action already established in `DP-ENGINE-001/005`:
+No new customer configuration is introduced. The reviewer only checks automatically proposed candidates and confirms/rejects them.
 
-- inspect automatically proposed candidates;
-- confirm one; or
-- reject them.
-
-The reviewer does **not**:
-
-- reacquire the page;
-- inspect DOM/CSS/XPath;
-- reconstruct a failed batch;
-- re-enter extracted values;
-- manage checkpoint files;
-- manually copy evidence between processes.
+The reviewer does not reacquire the page, inspect CSS/XPath/DOM, reconstruct batches, re-enter values, or manage persistence files.
 
 ## Explicit non-goals
 
@@ -307,41 +226,36 @@ The reviewer does **not**:
 
 - reviewer identity/RBAC;
 - encryption-at-rest/key management;
-- web review UI;
+- review web UI;
 - distributed/network database deployment;
 - cross-node transactions;
-- object/blob storage for very large raw page archives;
-- review assignment/claim/lease queues;
-- SLA/escalation rules;
+- blob/object storage for large source archives;
+- review claim/lease queues;
+- SLA/escalation;
 - publication/export sinks;
 - manual value correction;
-- CSS/XPath learning;
-- authentication/session persistence.
-
-Those layers can consume the durable result/review contract later.
+- CSS/XPath learning.
 
 ## Acceptance evidence
 
-The targeted `DP-ENGINE-008` regression harness verifies:
+The targeted regressions cover:
 
-- codec round-trip preserves candidate values/ids/evidence;
-- bytes/tuple metadata survives persistence;
-- default codec omits raw page content;
-- explicit full-snapshot mode preserves raw content;
-- unsupported arbitrary values fail explicitly;
-- payload hash detects tampering;
-- initial persistence is idempotent for the same payload;
-- differing existing payload cannot be silently overwritten;
-- JSON store survives reload and lists pending reviews;
-- two SQLite store instances observe shared durable state;
-- SQLite revision conflicts are enforced;
-- persisted review can be confirmed without reacquisition;
-- review confirmation changes durable status to ready;
-- checkpoint review state synchronizes to succeeded;
-- definition mismatch blocks unsafe review;
-- executor resume rehydrates terminal result payload;
-- crash between result persistence and terminal checkpoint does not cause refetch;
-- `resume=False` clears prior result state before reexecution;
-- stale review revision is rejected.
+- candidate/evidence/value round-trip;
+- bytes/tuple metadata preservation;
+- minimal raw-content mode;
+- explicit full-snapshot mode;
+- preservation of full-snapshot policy through later review;
+- unsupported value rejection;
+- payload tamper detection;
+- idempotent initial persistence and conflict protection;
+- JSON reload/pending-review listing;
+- shared SQLite state and revision conflict;
+- post-restart confirmation without reacquisition;
+- checkpoint synchronization after confirmation;
+- definition-hash protection;
+- terminal result rehydration on executor resume;
+- crash-window recovery without refetch;
+- clean `resume=False` result reset;
+- stale review revision rejection.
 
-Local targeted persistence/review harness: **14 tests passed**.
+Local targeted persistence/review harness: **15 tests passed**.

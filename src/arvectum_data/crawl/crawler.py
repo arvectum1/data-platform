@@ -96,7 +96,7 @@ class URLDiscoveryCrawler:
                 base_url = final_url
                 if base_href:
                     candidate_base = canonicalize_url(final_url, base_href)
-                    if candidate_base is not None and self._scope_allowed(candidate_base, seed_origins):
+                    if candidate_base is not None:
                         base_url = candidate_base
 
                 for anchor in anchors:

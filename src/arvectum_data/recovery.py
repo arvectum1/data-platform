@@ -15,7 +15,6 @@ class ExtractionQuality:
     unresolved_total: int
     review_total: int
     accepted_total: int
-    accepted_confidence: float
 
     @classmethod
     def from_result(cls, result: ExtractionResult) -> "ExtractionQuality":
@@ -41,19 +40,10 @@ class ExtractionQuality:
             accepted_total=sum(
                 decision.status in accepted_statuses for decision in decisions
             ),
-            accepted_confidence=round(
-                sum(
-                    decision.selected.confidence
-                    for decision in decisions
-                    if decision.selected is not None
-                    and decision.status in accepted_statuses
-                ),
-                12,
-            ),
         )
 
     @property
-    def rank(self) -> tuple[int, int, int, int, int, float]:
+    def rank(self) -> tuple[int, int, int, int, int]:
         """Higher rank means a better governed result."""
 
         return (
@@ -62,7 +52,6 @@ class ExtractionQuality:
             -self.unresolved_total,
             -self.review_total,
             self.accepted_total,
-            self.accepted_confidence,
         )
 
 

@@ -470,7 +470,13 @@ class ResultRepository:
         expected = record.revision if expected_revision is None else expected_revision
         if expected != record.revision:
             raise ResultConflictError("Expected revision does not match loaded durable result")
-        payload = self.codec.encode(result)
+        preserve_raw = bool(record.payload.get("raw_content_persisted", False))
+        codec = (
+            self.codec
+            if self.codec.include_raw_content is preserve_raw
+            else ResultCodec(include_raw_content=preserve_raw)
+        )
+        payload = codec.encode(result)
         updated = replace(
             record,
             status=result_status(result),

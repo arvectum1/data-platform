@@ -23,13 +23,31 @@ Domain-neutral data acquisition and extraction foundation for Arvectum products.
 - corroborating signals for the same value are merged into one evidence-rich candidate;
 - conflicting values remain separate candidates and therefore flow into the existing confirmation gate.
 
-The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors.
+`DP-ENGINE-003` adds URL acquisition and automatic rendered-page fallback:
 
-See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md) and [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md).
+- cheap HTTP fetch first in `AUTO` mode;
+- automatic browser fallback for HTTP failures and obvious client-rendered shells;
+- optional lazy Playwright renderer (no browser dependency in the core path);
+- explicit `AUTO`, `NEVER` and `ALWAYS` render modes;
+- bounded response size, timeout and HTTP(S)-only URL contract;
+- redirect/final-URL provenance and acquisition trace;
+- decoded HTML/text is normalized into the existing `RawAsset` contract;
+- no per-site transport toggles are needed in the normal path.
+
+The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, and do not choose static-vs-browser acquisition per site in the normal `AUTO` path.
+
+See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md) and [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md).
 
 ## Development
 
 ```bash
 python -m pip install -e '.[dev]'
 pytest
+```
+
+Browser rendering is optional. To enable the default Playwright fallback:
+
+```bash
+python -m pip install -e '.[browser]'
+playwright install chromium
 ```

@@ -17,14 +17,24 @@ from .engine import (
     ExtractionResult,
     FieldSpec,
 )
+from .profiles import (
+    ConfirmationLearner,
+    InMemorySiteProfileStore,
+    LearningEvent,
+    LearningPolicy,
+    ProfileAwareProvider,
+    SiteProfileStore,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class URLExtractionResult:
-    """End-to-end result retaining both acquisition and extraction evidence."""
+    """End-to-end result retaining acquisition, extraction and learning evidence."""
 
     acquisition: AcquisitionResult
     extraction: ExtractionResult
+    learning_events: tuple[LearningEvent, ...] = ()
+    learning_warnings: tuple[str, ...] = ()
 
     @property
     def asset(self):
@@ -49,7 +59,7 @@ class URLExtractionResult:
 
 
 class URLExtractionPipeline:
-    """One governed URL -> RawAsset -> candidates -> decisions execution path."""
+    """One governed URL -> acquisition -> learned discovery -> decisions path."""
 
     def __init__(
         self,
@@ -57,13 +67,51 @@ class URLExtractionPipeline:
         acquisition: AcquisitionEngine | None = None,
         extraction: ExtractionEngine | None = None,
         providers: Sequence[CandidateProvider] | None = None,
+        profile_store: SiteProfileStore | None = None,
+        learning_policy: LearningPolicy | None = None,
+        learning_enabled: bool = True,
+        strict_learning: bool = False,
     ) -> None:
         if extraction is not None and providers is not None:
             raise ValueError("Pass either extraction or providers, not both")
+
         self.acquisition = acquisition or AcquisitionEngine()
-        self.extraction = extraction or ExtractionEngine(
-            tuple(providers) if providers is not None else (AutoDiscoveryProvider(),)
+        self.learning_enabled = learning_enabled
+        self.strict_learning = strict_learning
+        self.learning_policy = learning_policy or LearningPolicy()
+        self.profile_store = (
+            profile_store
+            if profile_store is not None
+            else (InMemorySiteProfileStore() if learning_enabled else None)
         )
+        self.learner = (
+            ConfirmationLearner(self.profile_store)
+            if learning_enabled and self.profile_store is not None
+            else None
+        )
+
+        if extraction is not None:
+            self.extraction = extraction
+        else:
+            base_providers = (
+                tuple(providers)
+                if providers is not None
+                else (AutoDiscoveryProvider(),)
+            )
+            if learning_enabled and self.profile_store is not None:
+                effective_providers = tuple(
+                    provider
+                    if isinstance(provider, ProfileAwareProvider)
+                    else ProfileAwareProvider(
+                        provider,
+                        self.profile_store,
+                        policy=self.learning_policy,
+                    )
+                    for provider in base_providers
+                )
+            else:
+                effective_providers = base_providers
+            self.extraction = ExtractionEngine(effective_providers)
 
     def extract(
         self,
@@ -103,7 +151,22 @@ class URLExtractionPipeline:
         selections: Mapping[str, str | None],
     ) -> URLExtractionResult:
         confirmed = self.extraction.confirm(result.extraction, selections)
+
+        new_events: tuple[LearningEvent, ...] = ()
+        new_warnings: tuple[str, ...] = ()
+        if self.learner is not None:
+            try:
+                new_events = self.learner.learn(result.extraction, selections)
+            except Exception as exc:
+                if self.strict_learning:
+                    raise
+                new_warnings = (
+                    f"profile_learning_failed:{type(exc).__name__}:{exc}",
+                )
+
         return URLExtractionResult(
             acquisition=result.acquisition,
             extraction=confirmed,
+            learning_events=result.learning_events + new_events,
+            learning_warnings=result.learning_warnings + new_warnings,
         )

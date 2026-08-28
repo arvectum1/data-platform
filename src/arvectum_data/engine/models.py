@@ -29,6 +29,7 @@ class RawAsset:
     source_url: str | None = None
     text: str | None = None
     attributes: Mapping[str, Any] = field(default_factory=dict)
+    html: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +38,7 @@ class FieldSpec:
     required: bool = False
     min_confidence: float = 0.80
     min_margin: float = 0.10
+    aliases: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.key.strip():
@@ -45,6 +47,10 @@ class FieldSpec:
             raise ValueError("min_confidence must be between 0 and 1")
         if not 0.0 <= self.min_margin <= 1.0:
             raise ValueError("min_margin must be between 0 and 1")
+        cleaned = tuple(alias.strip() for alias in self.aliases if alias.strip())
+        if len(cleaned) != len(set(alias.casefold() for alias in cleaned)):
+            raise ValueError("FieldSpec aliases must be unique")
+        object.__setattr__(self, "aliases", cleaned)
 
 
 @dataclass(frozen=True, slots=True)

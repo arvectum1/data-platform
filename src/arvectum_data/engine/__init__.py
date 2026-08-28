@@ -1,3 +1,4 @@
+from .discovery import AutoDiscoveryProvider
 from .engine import ExtractionEngine
 from .models import (
     Candidate,
@@ -13,6 +14,7 @@ from .providers import AttributeProvider
 
 __all__ = [
     "AttributeProvider",
+    "AutoDiscoveryProvider",
     "Candidate",
     "CandidateProvider",
     "Evidence",

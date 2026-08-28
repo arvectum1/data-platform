@@ -1,4 +1,6 @@
 from .engine import (
+    AttributeProvider,
+    AutoDiscoveryProvider,
     Candidate,
     Evidence,
     ExtractionEngine,
@@ -10,6 +12,8 @@ from .engine import (
 )
 
 __all__ = [
+    "AttributeProvider",
+    "AutoDiscoveryProvider",
     "Candidate",
     "Evidence",
     "ExtractionEngine",

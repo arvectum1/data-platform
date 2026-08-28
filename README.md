@@ -43,9 +43,20 @@ Domain-neutral data acquisition and extraction foundation for Arvectum products.
 - `confirm()` continues the same result without reacquiring the page or losing transport provenance;
 - applications no longer need to manually glue `DP-ENGINE-003` to `DP-ENGINE-002`.
 
-The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, and do not wire the extraction stages manually in the normal path.
+`DP-ENGINE-005` adds bounded confirmation-learning without selector configuration:
 
-See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md) and [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md).
+- explicit reviewer confirmations teach structural evidence preferences for that site/field;
+- candidate values are never persisted in the site profile;
+- dynamic source indices are normalized into reusable structural fingerprints;
+- selected structures receive bounded confidence boosts and competing/rejected structures receive bounded penalties;
+- learning is scoped to the exact normalized host and does not leak across subdomains;
+- in-memory learning is enabled by default for `URLExtractionPipeline`;
+- `JsonSiteProfileStore` provides atomic persistent learning across process restarts;
+- auto-selected fields do not self-train.
+
+The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, and do not edit learned profiles in the normal path.
+
+See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md) and [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md).
 
 ## End-to-end usage
 
@@ -61,6 +72,18 @@ result = pipeline.extract_url(
 if result.ready:
     values = result.values()
 ```
+
+## Persistent site learning
+
+```python
+from arvectum_data import JsonSiteProfileStore, URLExtractionPipeline
+
+pipeline = URLExtractionPipeline(
+    profile_store=JsonSiteProfileStore("state/site-profiles.json"),
+)
+```
+
+The profile contains only structural evidence statistics; confirmed field values are not stored.
 
 ## Development
 

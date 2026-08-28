@@ -25,6 +25,20 @@ from .engine import (
     FieldStatus,
     RawAsset,
 )
+from .execution import (
+    JOB_CHECKPOINT_VERSION,
+    ExtractionJob,
+    InMemoryJobCheckpointStore,
+    JobCheckpointMismatchError,
+    JobCheckpointStore,
+    JobExecutor,
+    JobItem,
+    JobItemStatus,
+    JobRunResult,
+    JobStatus,
+    JsonJobCheckpointStore,
+    RetryPolicy,
+)
 from .orchestration import URLExtractionPipeline, URLExtractionResult
 from .profile_lifecycle import (
     PROFILE_SCHEMA_VERSION,
@@ -47,6 +61,7 @@ from .profiles import (
 )
 
 __all__ = [
+    "JOB_CHECKPOINT_VERSION",
     "PROFILE_SCHEMA_VERSION",
     "AcquisitionAttempt",
     "AcquisitionEngine",
@@ -61,12 +76,22 @@ __all__ = [
     "Evidence",
     "EvidenceFingerprint",
     "ExtractionEngine",
+    "ExtractionJob",
     "ExtractionResult",
     "FieldDecision",
     "FieldSpec",
     "FieldStatus",
     "HTTPTransport",
+    "InMemoryJobCheckpointStore",
     "InMemorySiteProfileStore",
+    "JobCheckpointMismatchError",
+    "JobCheckpointStore",
+    "JobExecutor",
+    "JobItem",
+    "JobItemStatus",
+    "JobRunResult",
+    "JobStatus",
+    "JsonJobCheckpointStore",
     "JsonSiteProfileStore",
     "LearningEvent",
     "LearningPolicy",
@@ -80,6 +105,7 @@ __all__ = [
     "ProfileSignalStats",
     "RawAsset",
     "RenderMode",
+    "RetryPolicy",
     "SQLiteSiteProfileStore",
     "SiteProfileStore",
     "URLExtractionPipeline",

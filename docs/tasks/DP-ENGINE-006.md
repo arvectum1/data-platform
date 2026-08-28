@@ -68,9 +68,7 @@ Schema v2 adds:
 
 Every successful learning mutation increments `revision`. A pruning operation increments revision only when it actually removes data.
 
-`ProfileAwareProvider` includes the observed store revision in its `site_profile` candidate metadata when the backend exposes one. `LearningEvent` also records the post-write store revision.
-
-This gives downstream runtime/cache layers a stable change token without exposing candidate values.
+The revision is available through `store.revision` and the persisted/snapshot payload, giving runtime/cache layers a stable change token without exposing candidate values. `DP-ENGINE-006` intentionally does not alter the existing `LearningEvent` or candidate metadata contracts solely to duplicate that token.
 
 ## JSON migration
 
@@ -111,9 +109,9 @@ This is intentionally a **single-node multi-process** backend. A network/distrib
 - `InMemorySiteProfileStore` still works with no arguments;
 - `JsonSiteProfileStore(path)` still works with no extra configuration;
 - `ConfirmationLearner` still calls the same `record(... positive=..., negative=...)` contract;
-- custom older stores remain runtime-tolerated for optional revision metadata.
+- `ProfileAwareProvider` still consumes the same `get_stats(...)` result shape.
 
-`ProfileSignalStats` counters are now floats because decay produces fractional effective weight. Integer-style comparisons such as `confirmations == 1` remain true for fresh single events.
+`ProfileSignalStats` itself is unchanged. Lifecycle stores may return fractional `confirmations`/`rejections` values at runtime because Python does not enforce the dataclass's integer annotations; fresh events remain exact integer-equivalent values.
 
 ## Human participation
 
@@ -161,7 +159,7 @@ The targeted regression harness verifies:
 - SQLite applies the same hard-TTL pruning behavior;
 - SQLite persistence survives reopen;
 - learning policy consumes fractional decayed weights;
-- candidate metadata exposes lifecycle-adjusted statistics/revision;
+- existing `ProfileAwareProvider` consumes decayed store stats without modification;
 - pipeline maintenance delegates to the configured store.
 
-Targeted local lifecycle harness passed before repository integration.
+Focused local lifecycle/compatibility harnesses passed before repository integration.

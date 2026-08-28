@@ -17,14 +17,16 @@ from .engine import (
     ExtractionResult,
     FieldSpec,
 )
+from .profile_lifecycle import (
+    InMemorySiteProfileStore,
+    ProfilePruneReport,
+    SiteProfileStore,
+)
 from .profiles import (
     ConfirmationLearner,
-    InMemorySiteProfileStore,
     LearningEvent,
     LearningPolicy,
     ProfileAwareProvider,
-    ProfilePruneReport,
-    SiteProfileStore,
 )
 
 

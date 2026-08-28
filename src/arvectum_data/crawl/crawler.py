@@ -52,6 +52,7 @@ class URLDiscoveryCrawler:
         queue = deque((url, 0) for url in canonical_seeds)
         queued = set(canonical_seeds)
         visited: set[str] = set()
+        resolved_pages: set[str] = set()
         known = set(canonical_seeds)
 
         discovered: list[CrawlLink] = []
@@ -66,7 +67,7 @@ class URLDiscoveryCrawler:
                 break
             url, depth = queue.popleft()
             queued.discard(url)
-            if url in visited:
+            if url in visited or url in resolved_pages:
                 continue
             visited.add(url)
 
@@ -85,6 +86,8 @@ class URLDiscoveryCrawler:
                 continue
 
             final_url = canonicalize_url(url, acquired.asset.source_url or url) or url
+            resolved_pages.add(final_url)
+            known.add(final_url)
             scope_allowed = self._scope_allowed(final_url, seed_origins)
             page_links = 0
 
@@ -126,7 +129,12 @@ class URLDiscoveryCrawler:
                     known.add(candidate)
                     page_links += 1
 
-                    if depth + 1 <= self.policy.max_depth and candidate not in visited and candidate not in queued:
+                    if (
+                        depth + 1 <= self.policy.max_depth
+                        and candidate not in visited
+                        and candidate not in resolved_pages
+                        and candidate not in queued
+                    ):
                         queue.append((candidate, depth + 1))
                         queued.add(candidate)
 

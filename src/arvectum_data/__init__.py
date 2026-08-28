@@ -59,6 +59,7 @@ from .profiles import (
     candidate_fingerprints,
     site_key_from_url,
 )
+from .recovery import ExtractionQuality, SemanticRecoveryPolicy
 from .results import (
     RESULT_SCHEMA_VERSION,
     InMemoryResultStore,
@@ -118,6 +119,7 @@ __all__ = [
     "EvidenceFingerprint",
     "ExtractionEngine",
     "ExtractionJob",
+    "ExtractionQuality",
     "ExtractionResult",
     "FieldDecision",
     "FieldSpec",
@@ -178,6 +180,7 @@ __all__ = [
     "SQLiteResultStore",
     "SQLiteReviewQueueStore",
     "SQLiteSiteProfileStore",
+    "SemanticRecoveryPolicy",
     "SiteProfileStore",
     "StoredResultRecord",
     "StoredResultStatus",

@@ -26,20 +26,22 @@ from .engine import (
     RawAsset,
 )
 from .orchestration import URLExtractionPipeline, URLExtractionResult
-from .profiles import (
+from .profile_lifecycle import (
     PROFILE_SCHEMA_VERSION,
-    ConfirmationLearner,
-    EvidenceFingerprint,
     InMemorySiteProfileStore,
     JsonSiteProfileStore,
+    ProfileLifecyclePolicy,
+    ProfilePruneReport,
+    SQLiteSiteProfileStore,
+    SiteProfileStore,
+)
+from .profiles import (
+    ConfirmationLearner,
+    EvidenceFingerprint,
     LearningEvent,
     LearningPolicy,
     ProfileAwareProvider,
-    ProfileLifecyclePolicy,
-    ProfilePruneReport,
     ProfileSignalStats,
-    SQLiteSiteProfileStore,
-    SiteProfileStore,
     candidate_fingerprints,
     site_key_from_url,
 )

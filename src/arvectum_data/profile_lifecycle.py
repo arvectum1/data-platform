@@ -41,7 +41,7 @@ class ProfileLifecyclePolicy:
         *,
         as_of: float,
     ) -> ProfileSignalStats:
-        age_seconds = max(0.0, as_of - updated_at)
+        age_seconds = float(int(max(0.0, as_of - updated_at)))
         if age_seconds >= self.max_signal_age_days * _SECONDS_PER_DAY:
             return ProfileSignalStats()
         factor = 0.5 ** (
@@ -60,7 +60,7 @@ class ProfileLifecyclePolicy:
         *,
         as_of: float,
     ) -> bool:
-        age_seconds = max(0.0, as_of - updated_at)
+        age_seconds = float(int(max(0.0, as_of - updated_at)))
         if age_seconds >= self.max_signal_age_days * _SECONDS_PER_DAY:
             return True
         effective = self.effective(
@@ -567,7 +567,8 @@ class SQLiteSiteProfileStore(_LifecycleBase):
                 self._set_revision(self.revision + 1)
                 self._connection.execute("COMMIT")
             except Exception:
-                self._connection.execute("ROLLBACK")
+                if self._connection.in_transaction:
+                    self._connection.execute("ROLLBACK")
                 raise
 
     def prune(self) -> ProfilePruneReport:
@@ -619,7 +620,8 @@ class SQLiteSiteProfileStore(_LifecycleBase):
                     self._set_revision(revision)
                 self._connection.execute("COMMIT")
             except Exception:
-                self._connection.execute("ROLLBACK")
+                if self._connection.in_transaction:
+                    self._connection.execute("ROLLBACK")
                 raise
         return ProfilePruneReport(
             removed_patterns=removed,

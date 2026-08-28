@@ -1,3 +1,18 @@
+from .acquisition import (
+    AcquisitionAttempt,
+    AcquisitionEngine,
+    AcquisitionError,
+    AcquisitionRequest,
+    AcquisitionResult,
+    DefaultRenderPolicy,
+    HTTPTransport,
+    MissingBrowserDependencyError,
+    PageRenderer,
+    PageSnapshot,
+    PlaywrightRenderer,
+    RenderMode,
+    UrllibHTTPTransport,
+)
 from .engine import (
     AttributeProvider,
     AutoDiscoveryProvider,
@@ -12,14 +27,27 @@ from .engine import (
 )
 
 __all__ = [
+    "AcquisitionAttempt",
+    "AcquisitionEngine",
+    "AcquisitionError",
+    "AcquisitionRequest",
+    "AcquisitionResult",
     "AttributeProvider",
     "AutoDiscoveryProvider",
     "Candidate",
+    "DefaultRenderPolicy",
     "Evidence",
     "ExtractionEngine",
     "ExtractionResult",
     "FieldDecision",
     "FieldSpec",
     "FieldStatus",
+    "HTTPTransport",
+    "MissingBrowserDependencyError",
+    "PageRenderer",
+    "PageSnapshot",
+    "PlaywrightRenderer",
     "RawAsset",
+    "RenderMode",
+    "UrllibHTTPTransport",
 ]

@@ -25,6 +25,7 @@ from .engine import (
     FieldStatus,
     RawAsset,
 )
+from .orchestration import URLExtractionPipeline, URLExtractionResult
 
 __all__ = [
     "AcquisitionAttempt",
@@ -49,5 +50,7 @@ __all__ = [
     "PlaywrightRenderer",
     "RawAsset",
     "RenderMode",
+    "URLExtractionPipeline",
+    "URLExtractionResult",
     "UrllibHTTPTransport",
 ]

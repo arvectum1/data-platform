@@ -149,6 +149,8 @@ It does **not** persist:
 - candidate evidence;
 - full `URLExtractionResult` objects.
 
+Persisted exception summaries redact HTTP(S) URL substrings before checkpoint serialization, so acquisition errors do not reintroduce URL/query payloads indirectly.
+
 This keeps execution progress separate from future output/review persistence and avoids turning arbitrary extraction values into an accidental checkpoint schema.
 
 ## Resume semantics
@@ -241,6 +243,7 @@ The targeted `DP-ENGINE-007` harness verifies:
 - interrupted attempts at the retry limit fail without reexecution;
 - JSON checkpoints survive reload while excluding URL/header payloads;
 - clearing a checkpoint permits clean reexecution;
-- invalid `max_items` is rejected.
+- invalid `max_items` is rejected;
+- failed checkpoint error summaries redact HTTP(S) URLs.
 
-Local targeted execution harness: **18 tests passed**.
+Local targeted execution harness: **19 tests passed**.

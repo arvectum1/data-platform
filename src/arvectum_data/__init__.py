@@ -26,21 +26,28 @@ from .engine import (
     RawAsset,
 )
 from .orchestration import URLExtractionPipeline, URLExtractionResult
+from .profile_lifecycle import (
+    PROFILE_SCHEMA_VERSION,
+    InMemorySiteProfileStore,
+    JsonSiteProfileStore,
+    ProfileLifecyclePolicy,
+    ProfilePruneReport,
+    SQLiteSiteProfileStore,
+    SiteProfileStore,
+)
 from .profiles import (
     ConfirmationLearner,
     EvidenceFingerprint,
-    InMemorySiteProfileStore,
-    JsonSiteProfileStore,
     LearningEvent,
     LearningPolicy,
     ProfileAwareProvider,
     ProfileSignalStats,
-    SiteProfileStore,
     candidate_fingerprints,
     site_key_from_url,
 )
 
 __all__ = [
+    "PROFILE_SCHEMA_VERSION",
     "AcquisitionAttempt",
     "AcquisitionEngine",
     "AcquisitionError",
@@ -68,9 +75,12 @@ __all__ = [
     "PageSnapshot",
     "PlaywrightRenderer",
     "ProfileAwareProvider",
+    "ProfileLifecyclePolicy",
+    "ProfilePruneReport",
     "ProfileSignalStats",
     "RawAsset",
     "RenderMode",
+    "SQLiteSiteProfileStore",
     "SiteProfileStore",
     "URLExtractionPipeline",
     "URLExtractionResult",

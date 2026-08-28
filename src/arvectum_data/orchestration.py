@@ -17,13 +17,16 @@ from .engine import (
     ExtractionResult,
     FieldSpec,
 )
+from .profile_lifecycle import (
+    InMemorySiteProfileStore,
+    ProfilePruneReport,
+    SiteProfileStore,
+)
 from .profiles import (
     ConfirmationLearner,
-    InMemorySiteProfileStore,
     LearningEvent,
     LearningPolicy,
     ProfileAwareProvider,
-    SiteProfileStore,
 )
 
 
@@ -170,3 +173,13 @@ class URLExtractionPipeline:
             learning_events=result.learning_events + new_events,
             learning_warnings=result.learning_warnings + new_warnings,
         )
+
+    def maintain_profiles(self) -> ProfilePruneReport | None:
+        """Prune expired/near-zero learned signals from the configured profile backend."""
+
+        if self.profile_store is None:
+            return None
+        prune = getattr(self.profile_store, "prune", None)
+        if prune is None:
+            return None
+        return prune()

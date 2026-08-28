@@ -54,9 +54,19 @@ Domain-neutral data acquisition and extraction foundation for Arvectum products.
 - `JsonSiteProfileStore` provides atomic persistent learning across process restarts;
 - auto-selected fields do not self-train.
 
+`DP-ENGINE-006` adds profile lifecycle and production-oriented persistence:
+
+- schema v2 timestamps every structural signal and versions every store revision;
+- learned weight decays by half-life and becomes ineffective after a hard TTL;
+- new confirmations are added to the already-decayed weight rather than reviving stale history;
+- `prune()` physically removes expired/near-zero signals, while lazy read-time expiry keeps decisions correct even before maintenance runs;
+- legacy JSON schema v1 migrates to schema v2 automatically;
+- `SQLiteSiteProfileStore` provides WAL-backed transactional storage for multiple processes on one runtime node;
+- `URLExtractionPipeline.maintain_profiles()` exposes a scheduler-friendly maintenance hook.
+
 The engine remains domain-neutral. Discount, doors, procurement, catalog and future domains define `FieldSpec` keys/aliases; operators do not inspect DOM nodes or maintain selectors, do not choose static-vs-browser acquisition per site, do not wire extraction stages manually, and do not edit learned profiles in the normal path.
 
-See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md) and [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md).
+See [`docs/tasks/DP-ENGINE-001.md`](docs/tasks/DP-ENGINE-001.md), [`docs/tasks/DP-ENGINE-002.md`](docs/tasks/DP-ENGINE-002.md), [`docs/tasks/DP-ENGINE-003.md`](docs/tasks/DP-ENGINE-003.md), [`docs/tasks/DP-ENGINE-004.md`](docs/tasks/DP-ENGINE-004.md), [`docs/tasks/DP-ENGINE-005.md`](docs/tasks/DP-ENGINE-005.md) and [`docs/tasks/DP-ENGINE-006.md`](docs/tasks/DP-ENGINE-006.md).
 
 ## End-to-end usage
 
@@ -75,6 +85,8 @@ if result.ready:
 
 ## Persistent site learning
 
+For one local process, JSON remains available:
+
 ```python
 from arvectum_data import JsonSiteProfileStore, URLExtractionPipeline
 
@@ -83,7 +95,16 @@ pipeline = URLExtractionPipeline(
 )
 ```
 
-The profile contains only structural evidence statistics; confirmed field values are not stored.
+For a multi-process runtime on one host, use SQLite:
+
+```python
+from arvectum_data import SQLiteSiteProfileStore, URLExtractionPipeline
+
+store = SQLiteSiteProfileStore("state/site-profiles.db")
+pipeline = URLExtractionPipeline(profile_store=store)
+```
+
+The profile contains only structural evidence statistics; confirmed field values are not stored. The default lifecycle uses a 30-day half-life and a 180-day hard TTL. Expired signals stop affecting scoring lazily; a runtime scheduler may call `pipeline.maintain_profiles()` to reclaim storage.
 
 ## Development
 

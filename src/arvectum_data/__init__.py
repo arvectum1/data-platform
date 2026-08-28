@@ -13,6 +13,14 @@ from .acquisition import (
     RenderMode,
     UrllibHTTPTransport,
 )
+from .crawl import (
+    CrawlDiscoveryResult,
+    CrawlFailure,
+    CrawlLink,
+    CrawlPageRecord,
+    CrawlPolicy,
+    URLDiscoveryCrawler,
+)
 from .engine import (
     AttributeProvider,
     AutoDiscoveryProvider,
@@ -113,6 +121,11 @@ __all__ = [
     "AutoDiscoveryProvider",
     "Candidate",
     "ConfirmationLearner",
+    "CrawlDiscoveryResult",
+    "CrawlFailure",
+    "CrawlLink",
+    "CrawlPageRecord",
+    "CrawlPolicy",
     "DefaultRenderPolicy",
     "DurableReviewCoordinator",
     "Evidence",
@@ -184,6 +197,7 @@ __all__ = [
     "SiteProfileStore",
     "StoredResultRecord",
     "StoredResultStatus",
+    "URLDiscoveryCrawler",
     "URLExtractionPipeline",
     "URLExtractionResult",
     "UrllibHTTPTransport",

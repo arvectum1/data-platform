@@ -54,7 +54,13 @@ class ResultCodec:
 
     def decode(self, payload: Mapping[str, Any]) -> URLExtractionResult:
         try:
-            asset = self._decode_asset(self._mapping(payload, "asset"))
+            raw_flag = payload.get("raw_content_persisted", False)
+            if not isinstance(raw_flag, bool):
+                raise ResultIntegrityError("raw_content_persisted must be boolean")
+            asset = self._decode_asset(
+                self._mapping(payload, "asset"),
+                raw_content_persisted=raw_flag,
+            )
             acquisition_payload = self._mapping(payload, "acquisition")
             extraction_payload = self._mapping(payload, "extraction")
             attempts_raw = acquisition_payload.get("attempts", ())
@@ -114,13 +120,23 @@ class ResultCodec:
             )
         return payload
 
-    def _decode_asset(self, payload: Mapping[str, Any]) -> RawAsset:
+    def _decode_asset(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        raw_content_persisted: bool,
+    ) -> RawAsset:
         metadata = self._decode_value(payload.get("metadata", ["dict", []]))
         if not isinstance(metadata, Mapping):
             raise ResultIntegrityError("asset.metadata must decode to a mapping")
-        raw_persisted = "text" in payload or "html" in payload or "attributes" in payload
+        raw_keys = {"text", "html", "attributes"}
+        present_raw_keys = raw_keys.intersection(payload)
+        if raw_content_persisted and present_raw_keys != raw_keys:
+            raise ResultIntegrityError("full raw-content payload is incomplete")
+        if not raw_content_persisted and present_raw_keys:
+            raise ResultIntegrityError("raw content present while policy marker is false")
         attributes: Mapping[str, Any] = {}
-        if raw_persisted:
+        if raw_content_persisted:
             decoded_attributes = self._decode_value(payload.get("attributes", ["dict", []]))
             if not isinstance(decoded_attributes, Mapping):
                 raise ResultIntegrityError("asset.attributes must decode to a mapping")
@@ -128,9 +144,9 @@ class ResultCodec:
         return RawAsset(
             asset_id=str(payload["asset_id"]),
             source_url=None if payload.get("source_url") is None else str(payload.get("source_url")),
-            text=None if not raw_persisted or payload.get("text") is None else str(payload.get("text")),
+            text=None if not raw_content_persisted or payload.get("text") is None else str(payload.get("text")),
             attributes=dict(attributes),
-            html=None if not raw_persisted or payload.get("html") is None else str(payload.get("html")),
+            html=None if not raw_content_persisted or payload.get("html") is None else str(payload.get("html")),
             metadata=dict(metadata),
         )
 
